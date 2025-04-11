@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Temperature Anomaly Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #fafafa;
+    }
+    .line {
+      fill: none;
+      stroke-width: 2;
+      opacity: 0.8;
+    }
+    .tooltip {
+      position: absolute;
+      background: white;
+      border: 1px solid #ccc;
+      padding: 6px;
+      font-size: 12px;
+      pointer-events: none;
+    }
+    .legend {
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .legend text {
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <svg width="1000" height="600"></svg>
+  <script>
+    const svg = d3.select("svg"),
+          margin = {top: 30, right: 150, bottom: 50, left: 60},
+          width = +svg.attr("width") - margin.left - margin.right,
+          height = +svg.attr("height") - margin.top - margin.bottom,
+          g = svg.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const color = d3.scaleOrdinal()
+      .domain(months)
+      .range(d3.schemeCategory10.concat(d3.schemePastel1));
+
+    const tooltip = d3.select("body").append("div").attr("class", "tooltip").style("opacity", 0);
+
+    d3.csv("data.csv").then(data => {
+      data.forEach(d => {
+        d.Year = +d.Year;
+        months.forEach(m => d[m] = +d[m]);
+      });
+
+      const x = d3.scaleLinear()
+        .domain(d3.extent(data, d => d.Year))
+        .range([0, width]);
+
+      const y = d3.scaleLinear()
+        .domain([
+          d3.min(data, d => d3.min(months, m => d[m])),
+          d3.max(data, d => d3.max(months, m => d[m]))
+        ])
+        .nice()
+        .range([height, 0]);
+
+      const xAxis = d3.axisBottom(x).ticks(10).tickFormat(d3.format("d"));
+      const yAxis = d3.axisLeft(y);
+
+      //zoom in-out function
+      const zoom = d3.zoom()
+        .scaleExtent([1, 10])
+        .translateExtent([[0, 0], [width, height]])
+        .extent([[0, 0], [width, height]])
+        .on("zoom", zoomed);
+
+      g.append("g")
+        .attr("class", "x-axis")
+        .attr("transform", `translate(0,${height})`)
+        .call(xAxis)
+        .append("text")
+        .attr("x", width / 2)
+        .attr("y", 40)
+        .attr("fill", "#000")
+        .style("text-anchor", "middle")
+        .text("Year");
+
+        g.append("g")
+          .attr("class", "y-axis")
+          .call(yAxis)
+          .append("text")
+          .attr("transform", "rotate(-90)")
+          .attr("x", -height / 2)
+          .attr("y", -40)
+          .attr("fill", "#000")
+          .style("text-anchor", "middle")
+          .text("Temperature Anomaly (0.01°C)");
+
+      // Add lines
+      const lines = {};
+      months.forEach(month => {
+        lines[month] = g.append("path")
+          .datum(data)
+          .attr("class", "line")
+          .attr("stroke", color(month))
+          .attr("d", d3.line()
+            .x(d => x(d.Year))
+            .y(d => y(d[month]))
+          );
+      });
+
+      // Add tooltip points
+      months.forEach(month => {
+        g.selectAll(`.dot-${month}`)
+          .data(data)
+          .enter()
+          .append("circle")
+          .attr("class", `dot dot-${month}`)
+          .attr("cx", d => x(d.Year))
+          .attr("cy", d => y(d[month]))
+          .attr("r", 2)
+          .attr("fill", color(month))
+          .on("mouseover", (event, d) => {
+            tooltip.transition().duration(200).style("opacity", 1);
+            tooltip.html(`<strong>${month}</strong><br>Year: ${d.Year}<br>Anomaly: ${d[month]}`)
+              .style("left", (event.pageX + 10) + "px")
+              .style("top", (event.pageY - 28) + "px");
+          })
+          .on("mouseout", () => tooltip.transition().duration(500).style("opacity", 0));
+      });
+
+      // Interactive Legend
+      svg.append("text")
+          .attr("x", width + margin.left + 20)
+          .attr("y", margin.top - 10)
+          .attr("font-size", "14px")
+          .attr("font-weight", "bold")
+          .text("Legend");
+      const legend = svg.append("g")
+        .attr("class", "legend")
+        .attr("transform", `translate(${width + margin.left + 20},${margin.top})`);
+
+      months.forEach((month, i) => {
+        const legendRow = legend.append("g")
+          .attr("transform", `translate(0, ${i * 20})`)
+          .on("click", () => {
+            const path = lines[month];
+            const visible = path.style("display") !== "none";
+            path.style("display", visible ? "none" : "inline");
+            svg.selectAll(`.dot-${month}`).style("display", visible ? "none" : "inline");
+          });
+
+        legendRow.append("rect")
+          .attr("width", 12).attr("height", 12)
+          .attr("fill", color(month));
+
+        legendRow.append("text")
+          .attr("x", 18)
+          .attr("y", 10)
+          .text(month);
+      });
+
+      //interactive zoom in-out feature
+      svg.call(zoom);
+      
+      function zoomed(event) {
+        const transform = event.transform;
+
+        const zx = transform.rescaleX(x);
+        const zy = transform.rescaleY(y);
+
+        g.select(".x-axis").call(xAxis.scale(zx));
+        g.select(".y-axis").call(yAxis.scale(zy));
+
+        months.forEach(month => {
+          lines[month].attr("d", d3.line()
+            .x(d => zx(d.Year))
+            .y(d => zy(d[month]))
+          );
+
+          g.selectAll(`.dot-${month}`)
+            .attr("cx", d => zx(d.Year))
+            .attr("cy", d => zy(d[month]));
+        });
+      }
+    });
+  </script>
+</body>
+</html>
